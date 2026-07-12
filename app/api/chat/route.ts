@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
-import { products } from "@/data/products";
+import { products, Product } from "../../data/products";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -11,8 +11,10 @@ export async function POST(req: NextRequest) {
 
   const productList = products
     .map(
-      (p) =>
-        `- ${p.name} | Category: ${p.category} | Price: $${p.price} | ${p.inStock ? "In Stock" : "Out of Stock"} | Rating: ${p.rating}/5 | ${p.description}`
+      (p: Product) =>
+        `- ${p.name} | Category: ${p.category} | Price: $${p.price} | ${
+          p.inStock ? "In Stock" : "Out of Stock"
+        } | Rating: ${p.rating}/5 | ${p.description}`
     )
     .join("\n");
 
