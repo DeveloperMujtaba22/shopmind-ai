@@ -1,9 +1,22 @@
 "use client";
 import { useState } from "react";
+import ProductCard from "./ProductCard";
+import { Product } from "../data/products";
 
 interface Message {
   role: "user" | "ai";
   content: string;
+  products?: Product[];
+}
+
+function formatMessage(text: string) {
+  const parts = text.split(/(\*\*.*?\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
+    }
+    return <span key={i}>{part}</span>;
+  });
 }
 
 export default function ChatBox() {
@@ -34,7 +47,11 @@ export default function ChatBox() {
       const data = await res.json();
       setMessages((prev) => [
         ...prev,
-        { role: "ai", content: data.reply },
+        {
+          role: "ai",
+          content: data.reply,
+          products: Array.isArray(data.products) ? data.products : [],
+        },
       ]);
     } catch {
       setMessages((prev) => [
@@ -66,19 +83,28 @@ export default function ChatBox() {
         {messages.map((msg, i) => (
           <div
             key={i}
-            className={`flex ${
-              msg.role === "user" ? "justify-end" : "justify-start"
+            className={`flex flex-col ${
+              msg.role === "user" ? "items-end" : "items-start"
             }`}
           >
             <div
-              className={`max-w-[80%] p-3 rounded-2xl text-sm ${
+              className={`max-w-[80%] p-3 rounded-2xl text-sm whitespace-pre-line leading-relaxed ${
                 msg.role === "user"
                   ? "bg-blue-600 text-white rounded-br-none"
                   : "bg-gray-700 text-gray-100 rounded-bl-none"
               }`}
             >
-              {msg.content}
+              {msg.role === "ai" ? formatMessage(msg.content) : msg.content}
             </div>
+
+            {/* Product cards, if the AI matched any products to this reply */}
+            {msg.products && msg.products.length > 0 && (
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-[95%]">
+                {msg.products.map((product) => (
+                  <ProductCard key={product.id} product={product} />
+                ))}
+              </div>
+            )}
           </div>
         ))}
         {loading && (
@@ -112,7 +138,7 @@ export default function ChatBox() {
                      py-2 rounded-xl hover:bg-blue-700 
                      disabled:opacity-50 transition-all"
         >
-          Send 🚀
+          Send 
         </button>
       </div>
     </div>
