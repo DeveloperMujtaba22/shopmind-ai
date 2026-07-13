@@ -1,48 +1,52 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { products, Product } from "../../data/products";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const genAI = new GoogleGenerativeAI(
+  process.env.GEMINI_API_KEY!
+);
 
 export async function POST(req: NextRequest) {
-  const { message } = await req.json();
+  try {
+    const { message } = await req.json();
 
-  const productList = products
-    .map(
-      (p: Product) =>
-        `- ${p.name} | Category: ${p.category} | Price: $${p.price} | ${
-          p.inStock ? "In Stock" : "Out of Stock"
-        } | Rating: ${p.rating}/5 | ${p.description}`
-    )
-    .join("\n");
+    const productList = products
+      .map(
+        (p: Product) =>
+          `- ${p.name} | Category: ${p.category} | 
+           Price: $${p.price} | ${
+             p.inStock ? "In Stock" : "Out of Stock"
+           } | Rating: ${p.rating}/5 | ${p.description}`
+      )
+      .join("\n");
 
-  const completion = await openai.chat.completions.create({
-    model: "gpt-3.5-turbo",
-    messages: [
-      {
-        role: "system",
-        content: `You are ShopMind AI — a helpful shopping assistant.
-        
+    const model = genAI.getGenerativeModel({
+      model: "gemini-1.5-flash",
+    });
+
+    const prompt = `You are ShopMind AI — a helpful 
+shopping assistant.
+
 Here are the available products:
 ${productList}
 
 Help users find products based on their needs.
 Recommend products, compare them, and answer questions.
 Always mention price and availability.
-Be friendly and helpful! 🛒`,
-      },
-      {
-        role: "user",
-        content: message,
-      },
-    ],
-  });
+Be friendly and helpful! 🛒
 
-  const reply =
-    completion.choices[0].message.content ||
-    "Sorry, I could not process your request.";
+User question: ${message}`;
 
-  return NextResponse.json({ reply });
+    const result = await model.generateContent(prompt);
+    const reply = result.response.text();
+
+    return NextResponse.json({ reply });
+
+  } catch (error) {
+    console.error("Gemini Error:", error);
+    return NextResponse.json(
+      { reply: "Sorry, something went wrong!" },
+      { status: 500 }
+    );
+  }
 }
