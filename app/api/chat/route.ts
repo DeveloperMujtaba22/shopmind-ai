@@ -1,23 +1,31 @@
-import OpenAI from "openai";
 import { NextRequest, NextResponse } from "next/server";
+import Groq from "groq-sdk";
+import { products } from "../../data/products";
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY!,
 });
 
 export async function POST(req: NextRequest) {
   try {
     const { message } = await req.json();
 
-    const response = await client.responses.create({
-      model: "gpt-4.1-mini",
-      input: `You are ShopMind AI, a shopping assistant.
-
-User: ${message}`,
+    const completion = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: [
+        {
+          role: "system",
+          content: "You are ShopMind AI.",
+        },
+        {
+          role: "user",
+          content: message,
+        },
+      ],
     });
 
     return NextResponse.json({
-      reply: response.output_text,
+      reply: completion.choices[0].message.content,
     });
   } catch (error: any) {
     console.error(error);
