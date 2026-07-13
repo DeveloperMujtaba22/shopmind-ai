@@ -1,35 +1,79 @@
 import { NextRequest, NextResponse } from "next/server";
 import Groq from "groq-sdk";
-import { products } from "../../data/products";
+import { products, Product } from "../../data/products";
+import { getUnsplashImage } from "../../lib/unsplash";
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY!,
 });
 
+const CATEGORIES = Array.from(new Set(products.map((p) => p.category)));
+
+interface Filters {
+  category: string | null;
+  maxPrice: number | null;
+  minRating: number | null;
+  keywords: string | null;
+  isGreeting: boolean;
+}
+
+function applyFilters(filters: Filters): Product[] {
+  return products.filter((p) => {
+    if (
+      filters.category &&
+      p.category.toLowerCase() !== filters.category.toLowerCase()
+    ) {
+      return false;
+    }
+    if (filters.maxPrice != null && p.price > filters.maxPrice) {
+      return false;
+    }
+    if (filters.minRating != null && p.rating < filters.minRating) {
+      return false;
+    }
+    if (filters.keywords) {
+      const kw = filters.keywords.toLowerCase();
+      const haystack = `${p.name} ${p.description}`.toLowerCase();
+      if (!haystack.includes(kw)) {
+        return false;
+      }
+    }
+    return true;
+  });
+}
+
+// Resolve real Unsplash photos for the matched products, falling back to
+// the static placeholder in products.ts if the API call fails or is unset.
+async function withRealImages(matched: Product[]): Promise<Product[]> {
+  return Promise.all(
+    matched.map(async (p) => {
+      const unsplashImage = await getUnsplashImage(p.name);
+      return unsplashImage ? { ...p, image: unsplashImage } : p;
+    })
+  );
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { message } = await req.json();
 
-    // Give the model the catalog so it can pick relevant products.
-    const catalog = products
-      .map(
-        (p) =>
-          `id:${p.id} | ${p.name} | ${p.category} | $${p.price} | rating:${p.rating} | ${
-            p.inStock ? "in stock" : "out of stock"
-          }`
-      )
-      .join("\n");
+    // The model's ONLY job is to extract filter intent as JSON.
+    // The actual filtering happens deterministically in code below,
+    // so a small model guessing product IDs can never return wrong products.
+    const systemPrompt = `You are an intent parser for a shopping assistant.
+Valid categories in this store: ${CATEGORIES.join(", ")}.
 
-    const systemPrompt = `You are ShopMind AI, a shopping assistant for this store.
+Given the user's message, respond with ONLY a JSON object, no extra text, no markdown fences, in this exact shape:
+{
+  "category": "<one of the valid categories above, or null if not specified>",
+  "maxPrice": <number or null>,
+  "minRating": <number or null>,
+  "keywords": "<a single relevant keyword from the message, or null>",
+  "isGreeting": <true if this is just a greeting/small talk with no product intent, else false>,
+  "reply": "<a short, natural one-sentence reply to show the user, e.g. 'Here are the electronics under $1000:' or a friendly greeting if isGreeting is true>"
+}
 
-Here is the current product catalog:
-${catalog}
-
-When the user asks about products (browsing, searching, filtering by price/category/etc), respond with ONLY a JSON object — no extra text, no markdown fences — in this exact shape:
-{"reply": "<short conversational reply>", "productIds": [<matching product id numbers>]}
-
-If the user is not asking about products (greeting, small talk, general question), use the same JSON shape with an empty productIds array.
-Only ever include productIds that exist in the catalog above. Never invent products or ids.`;
+Only use categories from the valid list above. Never invent a category.`;
 
     const completion = await groq.chat.completions.create({
       model: "llama-3.1-8b-instant",
@@ -41,23 +85,43 @@ Only ever include productIds that exist in the catalog above. Never invent produ
 
     const raw = completion.choices[0].message.content ?? "";
 
-    let reply = raw;
-    let matchedProducts: typeof products = [];
+    let reply = "Here's what I found:";
+    let matchedProducts: Product[] = [];
 
     try {
       const cleaned = raw.replace(/```json|```/g, "").trim();
       const parsed = JSON.parse(cleaned);
-      reply = typeof parsed.reply === "string" ? parsed.reply : raw;
-      const ids: number[] = Array.isArray(parsed.productIds) ? parsed.productIds : [];
-      matchedProducts = products.filter((p) => ids.includes(p.id));
+
+      reply = typeof parsed.reply === "string" ? parsed.reply : reply;
+
+      if (!parsed.isGreeting) {
+        const filters: Filters = {
+          category:
+            typeof parsed.category === "string" &&
+            CATEGORIES.some(
+              (c) => c.toLowerCase() === parsed.category.toLowerCase()
+            )
+              ? parsed.category
+              : null,
+          maxPrice: typeof parsed.maxPrice === "number" ? parsed.maxPrice : null,
+          minRating:
+            typeof parsed.minRating === "number" ? parsed.minRating : null,
+          keywords:
+            typeof parsed.keywords === "string" ? parsed.keywords : null,
+          isGreeting: false,
+        };
+        matchedProducts = applyFilters(filters);
+      }
     } catch {
-      // Model didn't return valid JSON (e.g. it just chatted normally) —
-      // fall back to showing the raw text with no product cards.
+      // Model didn't return valid JSON — fall back to a plain reply, no cards.
+      reply = raw || "Sorry, I didn't quite catch that — could you rephrase?";
     }
+
+    const productsWithImages = await withRealImages(matchedProducts);
 
     return NextResponse.json({
       reply,
-      products: matchedProducts,
+      products: productsWithImages,
     });
   } catch (error: any) {
     console.error(error);
