@@ -1,9 +1,12 @@
 "use client";
 import { useState } from "react";
+import ProductCard from "./ProductCard";
+import { Product } from "../data/products";
 
 interface Message {
   role: "user" | "ai";
   content: string;
+  products?: Product[];
 }
 
 export default function ChatBox() {
@@ -34,7 +37,11 @@ export default function ChatBox() {
       const data = await res.json();
       setMessages((prev) => [
         ...prev,
-        { role: "ai", content: data.reply },
+        {
+          role: "ai",
+          content: data.reply,
+          products: Array.isArray(data.products) ? data.products : [],
+        },
       ]);
     } catch {
       setMessages((prev) => [
@@ -66,8 +73,8 @@ export default function ChatBox() {
         {messages.map((msg, i) => (
           <div
             key={i}
-            className={`flex ${
-              msg.role === "user" ? "justify-end" : "justify-start"
+            className={`flex flex-col ${
+              msg.role === "user" ? "items-end" : "items-start"
             }`}
           >
             <div
@@ -79,6 +86,15 @@ export default function ChatBox() {
             >
               {msg.content}
             </div>
+
+            {/* Product cards, if the AI matched any products to this reply */}
+            {msg.products && msg.products.length > 0 && (
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-[95%]">
+                {msg.products.map((product) => (
+                  <ProductCard key={product.id} product={product} />
+                ))}
+              </div>
+            )}
           </div>
         ))}
         {loading && (
